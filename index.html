@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>متجر الألعاب</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- عناصر الصفحة: يمكنك تعديلها حسب مشروعك -->
+    <div id="loading-state">جار التحميل...</div>
+    <div id="error-state"><span id="error-message"></span></div>
+    <div id="main-content" style="display:none">
+        <nav>
+            <button id="store-btn">المتجر</button>
+            <button id="wishlist-btn">الأمنيات <span id="wishlist-count">0</span></button>
+            <button id="admin-btn" style="display:none">الإدارة</button>
+        </nav>
+        <div id="user-id-container" style="display:none">
+            <span id="user-id-display"></span>
+        </div>
+        <div id="store-view">
+            <div id="products-container"></div>
+        </div>
+        <div id="wishlist-view" style="display:none">
+            <div id="wishlist-container"></div>
+        </div>
+        <div id="admin-view" style="display:none">
+            <input id="name-input" placeholder="اسم اللعبة">
+            <input id="price-input" placeholder="السعر">
+            <input id="image-url-input" placeholder="رابط الصورة">
+            <input id="description-input" placeholder="الوصف">
+            <button id="save-product-btn">حفظ المنتج</button>
+            <button id="generate-desc-btn">توليد وصف</button>
+            <button id="generate-image-btn">توليد صورة</button>
+            <input id="click-input" placeholder="معلومات Click">
+            <input id="visa-input" placeholder="معلومات Visa">
+            <button id="update-payment-btn">تحديث معلومات الدفع</button>
+        </div>
+        <div>
+            <span>Click: <span id="click-info"></span></span>
+            <span>Visa: <span id="visa-info"></span></span>
+        </div>
+    </div>
+    <div id="modal" style="display:none">
+        <h2 id="modal-title"></h2>
+        <div id="modal-content"></div>
+        <button id="modal-close-btn">إغلاق</button>
+    </div>
+    <script type="module" src="deepseek_javascript_20250925_5b35da.js"></script>
+</body>
+</html>
