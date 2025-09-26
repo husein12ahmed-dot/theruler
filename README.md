@@ -1,2 +1,629 @@
-# theruler
-steam theruler free less more games game
+import { ChangeDetectionStrategy, Component, computed, signal, effect, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, query, where, getDocs, deleteDoc, Timestamp } from 'firebase/firestore';
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  imports: [CommonModule],
+  template: `
+    <div class="min-h-screen bg-gray-900 text-white font-inter flex flex-col items-center p-4 sm:p-8">
+      <!-- Header -->
+      <header class="w-full max-w-5xl text-center py-6">
+        <h1 class="text-4xl sm:text-6xl font-extrabold text-white animate-pulse">متجر الألعاب</h1>
+        <p class="text-gray-400 mt-2 text-lg sm:text-xl">بيع وشراء حسابات الألعاب</p>
+        <div *ngIf="userId()" class="mt-4 text-sm text-gray-500">
+          معرّف المستخدم الخاص بك: <span class="font-mono text-gray-300 break-all">{{ userId() }}</span>
+        </div>
+      </header>
+      
+      <!-- Loading & Error States -->
+      <div *ngIf="loading()" class="flex flex-col items-center justify-center p-8">
+        <div class="w-12 h-12 border-4 border-t-4 border-gray-600 rounded-full animate-spin"></div>
+        <p class="mt-4 text-gray-400">جاري التحميل...</p>
+      </div>
+      <div *ngIf="error()" class="bg-red-500 text-white p-4 rounded-lg shadow-md max-w-lg text-center">
+        <p>{{ error() }}</p>
+      </div>
+
+      <!-- Main Content -->
+      <main *ngIf="!loading() && !error()" class="w-full max-w-5xl mt-8 space-y-12">
+        <nav class="bg-gray-800 p-2 rounded-full shadow-lg flex justify-center space-x-4">
+          <button (click)="view.set('store')" [class.bg-indigo-600]="view() === 'store'" class="py-2 px-6 rounded-full text-white font-bold transition-colors duration-200">المتجر</button>
+          <button (click)="view.set('wishlist')" [class.bg-indigo-600]="view() === 'wishlist'" class="py-2 px-6 rounded-full text-white font-bold transition-colors duration-200">قائمة الأمنيات ({{ wishlistItems().length }})</button>
+          <button *ngIf="isAdmin()" (click)="view.set('admin')" [class.bg-indigo-600]="view() === 'admin'" class="py-2 px-6 rounded-full text-white font-bold transition-colors duration-200">لوحة الإدارة</button>
+        </nav>
+
+        <!-- Store View -->
+        @if (view() === 'store') {
+          <section>
+            <h2 class="text-3xl font-bold text-gray-100 mb-6 text-center">جميع الألعاب المتاحة</h2>
+            @if (productsWithComments().length === 0) {
+              <p class="text-center text-gray-500 text-lg">لا توجد ألعاب متوفرة حالياً.</p>
+            } @else {
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                @for (product of productsWithComments(); track product.id) {
+                  <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden flex flex-col transform transition-transform duration-300 hover:scale-[1.03]">
+                    <img [src]="product.imageUrl" [alt]="product.name" class="w-full h-48 object-cover object-center border-b border-gray-700">
+                    <div class="p-6 flex-grow flex flex-col justify-between">
+                      <div>
+                        <h3 class="text-xl font-bold text-gray-100">{{ product.name }}</h3>
+                        <p class="text-sm text-gray-400 mt-2">{{ product.description }}</p>
+                      </div>
+                      <div class="mt-4">
+                        <span class="text-3xl font-bold text-green-400">{{ product.price | currency:'JOD':'symbol':'1.2-2' }}</span>
+                        <div class="flex space-x-2 mt-2">
+                          <button (click)="addToWishlist(product)" class="bg-yellow-500 text-gray-900 font-semibold py-2 px-4 rounded-full transition-colors duration-200 hover:bg-yellow-400 text-sm">
+                            🤍 أضف للأمنيات
+                          </button>
+                          <button (click)="speakDescription(product.description)" class="bg-purple-600 text-white font-semibold py-2 px-4 rounded-full transition-colors duration-200 hover:bg-purple-700 text-sm">
+                            استمع للوصف ✨
+                          </button>
+                        </div>
+                      </div>
+                      <!-- Comments Section -->
+                      <div class="mt-6 border-t border-gray-700 pt-4">
+                        <h4 class="text-md font-semibold text-gray-200 mb-2">التعليقات</h4>
+                        <div class="space-y-2 max-h-32 overflow-y-auto pr-2">
+                          @for(comment of product.comments; track comment.id) {
+                            <div class="text-xs bg-gray-700 p-2 rounded-lg">
+                              <p class="text-gray-300">{{ comment.text }}</p>
+                              <p class="text-gray-500 text-right text-[10px]">~ {{ comment.userId.substring(0, 8) }}</p>
+                            </div>
+                          }
+                          @if(product.comments.length === 0) {
+                            <p class="text-xs text-gray-500">لا توجد تعليقات. كن أول من يعلق!</p>
+                          }
+                        </div>
+                        <div class="mt-3 flex">
+                          <input #commentInput type="text" placeholder="أضف تعليق..." class="flex-grow p-2 text-xs rounded-l-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                          <button (click)="addComment(product.id, commentInput)" class="bg-indigo-600 text-white font-bold py-2 px-3 text-xs rounded-r-lg hover:bg-indigo-700">أرسل</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </section>
+        }
+
+        <!-- Wishlist View -->
+        @if (view() === 'wishlist') {
+          <section>
+            <h2 class="text-3xl font-bold text-gray-100 mb-6 text-center">قائمة أمنياتك</h2>
+            @if (wishlistItems().length === 0) {
+              <p class="text-center text-gray-500 text-lg">قائمة أمنياتك فارغة. قم بإضافة بعض الألعاب!</p>
+            } @else {
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                @for (item of wishlistItems(); track item.id) {
+                  <div class="bg-gray-800 rounded-xl shadow-lg p-6 flex items-center justify-between">
+                    <div>
+                      <h3 class="text-lg font-bold text-gray-100">{{ item.name }}</h3>
+                      <span class="text-xl font-semibold text-green-400">{{ item.price | currency:'JOD':'symbol':'1.2-2' }}</span>
+                    </div>
+                    <button (click)="removeFromWishlist(item.id)" class="text-red-400 hover:text-red-500 transition-colors duration-200">
+                      <span class="text-2xl">🗑️</span>
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </section>
+        }
+        
+        <!-- Admin View -->
+        @if (view() === 'admin') {
+          <section>
+            <h2 class="text-3xl font-bold text-gray-100 mb-6 text-center">لوحة الإدارة</h2>
+            <div class="space-y-8 max-w-2xl mx-auto">
+              <!-- Add Product -->
+              <div class="bg-gray-800 p-6 rounded-xl shadow-lg space-y-4">
+                <h3 class="text-2xl font-semibold text-gray-100">إضافة / تعديل لعبة</h3>
+                <input #nameInput type="text" placeholder="اسم اللعبة" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input #priceInput type="number" placeholder="السعر" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <input #imageUrlInput type="text" placeholder="رابط الصورة (URL)" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="flex space-x-2">
+                  <button (click)="generateImage(nameInput.value, imageUrlInput)" class="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200 hover:bg-blue-700">
+                    انشئ صورة ✨
+                  </button>
+                </div>
+                <textarea #descriptionInput placeholder="وصف اللعبة" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 h-24 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                <div class="flex justify-end space-x-2">
+                  <button (click)="generateDescription(nameInput.value, descriptionInput)" class="bg-purple-600 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200 hover:bg-purple-700">
+                    انشئ وصف ✨
+                  </button>
+                  <button (click)="saveProduct(nameInput.value, priceInput.value, imageUrlInput.value, descriptionInput.value)" class="bg-green-600 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200 hover:bg-green-700">
+                    حفظ اللعبة
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Manage Products -->
+              <div class="bg-gray-800 p-6 rounded-xl shadow-lg space-y-4">
+                <h3 class="text-2xl font-semibold text-gray-100">إدارة الألعاب</h3>
+                <div class="space-y-2">
+                    @for (product of products(); track product.id) {
+                        <div class="flex items-center justify-between bg-gray-700 p-3 rounded-lg">
+                            <span class="text-gray-200">{{ product.name }}</span>
+                            <button (click)="deleteProduct(product.id)" class="text-red-400 hover:text-red-500 transition-colors duration-200 font-bold">
+                                حذف
+                            </button>
+                        </div>
+                    }
+                    @if(products().length === 0) {
+                      <p class="text-center text-gray-500">لا توجد ألعاب لإدارتها.</p>
+                    }
+                </div>
+              </div>
+
+              <!-- Settings -->
+              <div class="bg-gray-800 p-6 rounded-xl shadow-lg space-y-4">
+                <h3 class="text-2xl font-semibold text-gray-100">الإعدادات</h3>
+                <input #clickInput type="text" placeholder="رقم حساب كليك" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" [value]="paymentInfo().click">
+                <input #visaInput type="text" placeholder="رقم حساب فيزا" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" [value]="paymentInfo().visa">
+                <input #whatsappInput type="text" placeholder="رقم الواتس اب (مع رمز الدولة)" class="w-full p-3 rounded-lg bg-gray-700 text-gray-100 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" [value]="paymentInfo().whatsapp">
+                <div class="flex justify-end">
+                  <button (click)="updateSettings(clickInput.value, visaInput.value, whatsappInput.value)" class="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-200 hover:bg-blue-700">
+                    تحديث
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </section>
+        }
+      </main>
+
+      <!-- Footer -->
+      <footer class="w-full max-w-5xl mt-12 py-6 text-center text-gray-500 border-t border-gray-800">
+        <p class="text-lg font-bold text-gray-300 mb-2">معلومات الدفع</p>
+        <p>
+          <span class="font-bold">كليك:</span> {{ paymentInfo().click || 'غير متوفر' }}
+        </p>
+        <p>
+          <span class="font-bold">فيزا:</span> {{ paymentInfo().visa || 'غير متوفر' }}
+        </p>
+      </footer>
+
+      <!-- WhatsApp Floating Button -->
+      <a *ngIf="paymentInfo().whatsapp" [href]="'https://wa.me/' + paymentInfo().whatsapp + '?text=مرحباً، أود إرسال إثبات الدفع.'" target="_blank" class="fixed bottom-6 right-6 bg-green-500 text-white w-16 h-16 rounded-full flex items-center justify-center shadow-lg transform transition-transform hover:scale-110">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.487 5.235 3.487 8.413 0 6.557-5.338 11.892-11.894 11.892-1.99 0-3.903-.52-5.613-1.476l-6.238 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.886-.001 2.267.655 4.398 1.908 6.166l-.253 1.018 1.023-.252zm7.49-6.201c-.37-.187-2.19-1.082-2.53-1.207-.34-.125-.582-.187-.825.187-.243.375-.957 1.207-.957 1.207-.224.25-.448.281-.824.093-.375-.187-1.575-.582-3.003-1.855-1.109-.968-1.857-2.173-2.08-2.548-.225-.375-.015-.582.171-.77.171-.171.375-.448.563-.66.187-.219.25-.375.375-.618.125-.25.063-.469-.031-.656-.094-.187-.825-1.984-.825-1.984-.281-.678-.563-.582-.781-.582h-.219c-.219 0-.563.094-.859.375-.297.281-1.125 1.109-1.125 2.703 0 1.594 1.156 3.125 1.313 3.344.156.219 2.281 3.656 5.531 4.875 3.25 1.219 3.25 1.219.907.828.625.094 1.969-.828 2.25-1.594.281-.766.281-1.422.188-1.594-.094-.172-.313-.281-.688-.469z"/></svg>
+      </a>
+
+      <!-- Modal for alerts -->
+      <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-xl max-w-sm w-full border border-gray-700">
+          <h3 id="modal-title" class="text-xl font-bold mb-4 text-gray-100"></h3>
+          <p id="modal-content" class="text-gray-400 mb-6"></p>
+          <div class="flex justify-end">
+            <button id="modal-close-btn" class="bg-indigo-600 text-white font-medium py-2 px-4 rounded-full hover:bg-indigo-700 transition duration-300">إغلاق</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  styleUrls: [],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class App implements OnInit {
+  // Signals for state management
+  loading = signal(true);
+  error = signal<string | null>(null);
+  view = signal<'store' | 'wishlist' | 'admin'>('store');
+  userId = signal<string | null>(null);
+  products = signal<any[]>([]);
+  wishlistItems = signal<any[]>([]);
+  comments = signal<any[]>([]);
+  paymentInfo = signal({ click: '', visa: '', whatsapp: '' });
+  
+  // Admin UID for demo purposes. This will be the UID of the first user to log in.
+  private readonly adminUid = '18382536631674206939';
+
+  isAdmin = computed(() => this.userId() === this.adminUid);
+
+  productsWithComments = computed(() => {
+    const prods = this.products();
+    const allComments = this.comments();
+    return prods.map(product => {
+      const productComments = allComments
+        .filter(comment => comment.productId === product.id)
+        .map(c => ({...c, timestamp: c.timestamp?.toDate()})) // Convert Firestore Timestamp to Date
+        .sort((a, b) => b.timestamp - a.timestamp); // Sort by newest first
+      return {
+        ...product,
+        comments: productComments
+      };
+    });
+  });
+
+  private db: any;
+  private auth: any;
+  private appId: string = '';
+
+  constructor() {
+    // Watch for changes in userId to set up listeners
+    effect(() => {
+      const uid = this.userId();
+      if (uid) {
+        // First, check if the adminUid is the default value
+        if (this.adminUid === 'CHANGE_THIS_TO_YOUR_USER_ID') {
+          console.warn('The admin user ID is not set. The first user to log in will be the admin.');
+          // You might set a value here for a real application, but for this demo, we assume the user will set it.
+        }
+        this.setupFirestoreListeners(uid);
+      }
+    });
+  }
+
+  ngOnInit() {
+    this.initializeFirebase();
+  }
+
+  async initializeFirebase() {
+    try {
+      this.appId = typeof (window as any).__app_id !== 'undefined' ? (window as any).__app_id : 'default-app-id';
+      const firebaseConfig = typeof (window as any).__firebase_config !== 'undefined' ? JSON.parse((window as any).__firebase_config) : {};
+      const initialAuthToken = typeof (window as any).__initial_auth_token !== 'undefined' ? (window as any).__initial_auth_token : null;
+
+      const app = initializeApp(firebaseConfig);
+      this.db = getFirestore(app);
+      this.auth = getAuth(app);
+
+      if (initialAuthToken) {
+        await signInWithCustomToken(this.auth, initialAuthToken);
+      } else {
+        await signInAnonymously(this.auth);
+      }
+      
+      this.userId.set(this.auth.currentUser?.uid);
+      this.loading.set(false);
+
+    } catch (e) {
+      console.error('Firebase Initialization Error:', e);
+      this.error.set('حدث خطأ في الاتصال بالخادم. يرجى المحاولة لاحقاً.');
+      this.loading.set(false);
+    }
+  }
+
+  setupFirestoreListeners(uid: string) {
+    // Products Listener (Public)
+    onSnapshot(collection(this.db, `artifacts/${this.appId}/public/data/products`), (snapshot) => {
+      const productsData: any[] = [];
+      snapshot.forEach(doc => {
+        productsData.push({ id: doc.id, ...doc.data() });
+      });
+      this.products.set(productsData);
+    });
+
+    // Wishlist Listener (Private)
+    onSnapshot(collection(this.db, `artifacts/${this.appId}/users/${uid}/wishlist`), (snapshot) => {
+      const wishlistData: any[] = [];
+      snapshot.forEach(doc => {
+        wishlistData.push({ id: doc.id, ...doc.data() });
+      });
+      this.wishlistItems.set(wishlistData);
+    });
+
+    // Comments Listener (Public)
+    onSnapshot(collection(this.db, `artifacts/${this.appId}/public/data/comments`), (snapshot) => {
+        const commentsData: any[] = [];
+        snapshot.forEach(doc => {
+            commentsData.push({ id: doc.id, ...doc.data() });
+        });
+        this.comments.set(commentsData);
+    });
+
+    // Payment Info Listener (Public for all to read, but admin user ID required to write)
+    const paymentDocRef = doc(this.db, `artifacts/${this.appId}/public/data/settings/payment`);
+    onSnapshot(paymentDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        this.paymentInfo.set(docSnap.data() as { click: string, visa: string, whatsapp: string });
+      } else {
+        this.paymentInfo.set({ click: '', visa: '', whatsapp: '' });
+      }
+    });
+  }
+
+  async generateDescription(gameName: string, descriptionInput: HTMLTextAreaElement) {
+    if (!gameName) {
+      this.showModal('خطأ', 'الرجاء إدخال اسم اللعبة أولاً.');
+      return;
+    }
+
+    const systemPrompt = "أنت كاتب محتوى إعلاني محترف للألعاب. قم بإنشاء وصف جذاب ومقنع للعبة بناءً على اسمها. الوصف يجب أن يكون قصيرًا ومثيرًا للاهتمام.";
+    const userQuery = `اكتب وصفًا للعبة تسمى: ${gameName}`;
+    const apiKey = "";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+    const payload = {
+        contents: [{ parts: [{ text: userQuery }] }],
+        systemInstruction: {
+            parts: [{ text: systemPrompt }]
+        },
+    };
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+            descriptionInput.value = text;
+        } else {
+            throw new Error('No content returned from API.');
+        }
+    } catch (e) {
+        console.error('Error generating description:', e);
+        this.showModal('خطأ', 'فشل في توليد الوصف. يرجى المحاولة مرة أخرى.');
+    }
+  }
+
+  async generateImage(gameName: string, imageUrlInput: HTMLInputElement) {
+    if (!gameName) {
+      this.showModal('خطأ', 'الرجاء إدخال اسم اللعبة أولاً لإنشاء صورة.');
+      return;
+    }
+    const payload = { instances: { prompt: `Artistic, high-quality, digital art of the game ${gameName}` }, parameters: { "sampleCount": 1} };
+    const apiKey = "";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        const base64Data = result?.predictions?.[0]?.bytesBase64Encoded;
+        if (base64Data) {
+            const imageUrl = `data:image/png;base64,${base64Data}`;
+            imageUrlInput.value = imageUrl;
+        } else {
+            throw new Error('No image data returned from API.');
+        }
+    } catch (e) {
+        console.error('Error generating image:', e);
+        this.showModal('خطأ', 'فشل في توليد الصورة. يرجى المحاولة مرة أخرى.');
+    }
+  }
+
+  async speakDescription(description: string) {
+    if (!description) {
+        this.showModal('خطأ', 'لا يوجد وصف للاستماع إليه.');
+        return;
+    }
+
+    const payload = {
+        contents: [{ parts: [{ text: description }] }],
+        generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+                voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: "Rasalgethi" }
+                }
+            }
+        },
+        model: "gemini-2.5-flash-preview-tts"
+    };
+    const apiKey = "";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        const part = result?.candidates?.[0]?.content?.parts?.[0];
+        const audioData = part?.inlineData?.data;
+        const mimeType = part?.inlineData?.mimeType;
+
+        if (audioData && mimeType && mimeType.startsWith("audio/")) {
+            const sampleRate = 16000; // API returns PCM16 at 16kHz
+            const pcmData = this.base64ToArrayBuffer(audioData);
+            const pcm16 = new Int16Array(pcmData);
+            const wavBlob = this.pcmToWav(pcm16, sampleRate);
+            const audioUrl = URL.createObjectURL(wavBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        } else {
+            throw new Error('No audio data returned from API.');
+        }
+    } catch (e) {
+        console.error('Error with TTS:', e);
+        this.showModal('خطأ', 'فشل في تشغيل الصوت. يرجى المحاولة مرة أخرى.');
+    }
+  }
+
+  // Helper function to convert base64 to ArrayBuffer
+  private base64ToArrayBuffer(base64: string): ArrayBuffer {
+      const binaryString = atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes.buffer;
+  }
+
+  // Helper function to convert PCM data to WAV Blob
+  private pcmToWav(pcmData: Int16Array, sampleRate: number): Blob {
+      const buffer = new ArrayBuffer(44 + pcmData.length * 2);
+      const view = new DataView(buffer);
+
+      // Write WAV header
+      // RIFF identifier
+      this.writeString(view, 0, 'RIFF');
+      // file size
+      view.setUint32(4, 36 + pcmData.length * 2, true);
+      // RIFF format
+      this.writeString(view, 8, 'WAVE');
+      // fmt chunk identifier
+      this.writeString(view, 12, 'fmt ');
+      // fmt chunk size
+      view.setUint32(16, 16, true);
+      // audio format (PCM)
+      view.setUint16(20, 1, true);
+      // number of channels
+      view.setUint16(22, 1, true);
+      // sample rate
+      view.setUint32(24, sampleRate, true);
+      // byte rate
+      view.setUint32(28, sampleRate * 2, true);
+      // block align
+      view.setUint16(32, 2, true);
+      // bits per sample
+      view.setUint16(34, 16, true);
+      // data chunk identifier
+      this.writeString(view, 36, 'data');
+      // data chunk size
+      view.setUint32(40, pcmData.length * 2, true);
+      
+      // Write PCM data
+      let offset = 44;
+      for (let i = 0; i < pcmData.length; i++) {
+          view.setInt16(offset, pcmData[i], true);
+          offset += 2;
+      }
+
+      return new Blob([view], { type: 'audio/wav' });
+  }
+
+  private writeString(view: DataView, offset: number, string: string) {
+      for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+      }
+  }
+
+  async saveProduct(name: string, price: string, imageUrl: string, description: string) {
+    if (!name || !price || !imageUrl) {
+      this.showModal('خطأ', 'الرجاء إدخال اسم اللعبة والسعر ورابط الصورة.');
+      return;
+    }
+    
+    try {
+      const productRef = collection(this.db, `artifacts/${this.appId}/public/data/products`);
+      await addDoc(productRef, {
+        name: name,
+        price: parseFloat(price),
+        imageUrl: imageUrl,
+        description: description
+      });
+      this.showModal('تم بنجاح', 'تم إضافة اللعبة بنجاح!');
+    } catch (e) {
+      console.error('Error adding product:', e);
+      this.showModal('خطأ', 'فشل إضافة اللعبة. يرجى المحاولة مرة أخرى.');
+    }
+  }
+
+  async updateSettings(click: string, visa: string, whatsapp: string) {
+    try {
+      const paymentDocRef = doc(this.db, `artifacts/${this.appId}/public/data/settings/payment`);
+      await setDoc(paymentDocRef, { click, visa, whatsapp }, { merge: true });
+      this.showModal('تم بنجاح', 'تم تحديث الإعدادات.');
+    } catch (e) {
+      console.error('Error updating settings:', e);
+      this.showModal('خطأ', 'فشل تحديث الإعدادات. يرجى المحاولة مرة أخرى.');
+    }
+  }
+  
+  async addToWishlist(product: any) {
+    try {
+      const wishlistRef = collection(this.db, `artifacts/${this.appId}/users/${this.userId()}/wishlist`);
+      // Check if item already exists
+      const q = query(wishlistRef, where('name', '==', product.name));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        await addDoc(wishlistRef, {
+          name: product.name,
+          price: product.price,
+          addedAt: new Date().toISOString()
+        });
+        this.showModal('تم بنجاح', 'تمت إضافة اللعبة إلى قائمة الأمنيات.');
+      } else {
+        this.showModal('موجود مسبقاً', 'هذه اللعبة موجودة بالفعل في قائمة الأمنيات الخاصة بك.');
+      }
+    } catch (e) {
+      console.error('Error adding to wishlist:', e);
+      this.showModal('خطأ', 'فشل إضافة اللعبة إلى قائمة الأمنيات. يرجى المحاولة مرة أخرى.');
+    }
+  }
+
+  async removeFromWishlist(id: string) {
+    try {
+      const wishlistDocRef = doc(this.db, `artifacts/${this.appId}/users/${this.userId()}/wishlist`, id);
+      await deleteDoc(wishlistDocRef);
+      this.showModal('تم الحذف', 'تمت إزالة اللعبة من قائمة الأمنيات.');
+    } catch (e) {
+      console.error('Error removing from wishlist:', e);
+      this.showModal('خطأ', 'فشل إزالة اللعبة. يرجى المحاولة مرة أخرى.');
+    }
+  }
+
+  async deleteProduct(id: string) {
+    if (!this.isAdmin()) {
+      this.showModal('خطأ', 'ليس لديك صلاحية للقيام بهذا الإجراء.');
+      return;
+    }
+    try {
+      const productDocRef = doc(this.db, `artifacts/${this.appId}/public/data/products`, id);
+      await deleteDoc(productDocRef);
+      // You might want to delete associated comments as well, which requires more complex logic.
+      // For now, we just delete the product.
+      this.showModal('تم الحذف', 'تم حذف اللعبة بنجاح.');
+    } catch (e) {
+      console.error('Error deleting product:', e);
+      this.showModal('خطأ', 'فشل في حذف اللعبة.');
+    }
+  }
+
+  async addComment(productId: string, inputElement: HTMLInputElement) {
+    const text = inputElement.value;
+    if (!text.trim()) {
+      this.showModal('خطأ', 'التعليق لا يمكن أن يكون فارغاً.');
+      return;
+    }
+    try {
+      const commentsRef = collection(this.db, `artifacts/${this.appId}/public/data/comments`);
+      await addDoc(commentsRef, {
+        productId: productId,
+        text: text,
+        userId: this.userId() || 'زائر',
+        timestamp: Timestamp.now()
+      });
+      inputElement.value = ''; // Clear input on success
+    } catch (e) {
+      console.error('Error adding comment:', e);
+      this.showModal('خطأ', 'فشل في إضافة التعليق.');
+    }
+  }
+
+  // Custom modal to replace window.alert
+  private showModal(title: string, message: string) {
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalContent = document.getElementById('modal-content');
+    const modalCloseBtn = document.getElementById('modal-close-btn');
+
+    if (modal && modalTitle && modalContent && modalCloseBtn) {
+      modalTitle.textContent = title;
+      modalContent.textContent = message;
+      modal.style.display = 'flex';
+      
+      modalCloseBtn.onclick = () => {
+        modal.style.display = 'none';
+      };
+    }
+  }
+}
+
